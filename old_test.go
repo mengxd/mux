@@ -121,12 +121,7 @@ func TestRouteMatchers(t *testing.T) {
 		var routeMatch RouteMatch
 		matched := router.Match(request, &routeMatch)
 		if matched != shouldMatch {
-			// Need better messages. :)
-			if matched {
-				t.Errorf("Should match.")
-			} else {
-				t.Errorf("Should not match.")
-			}
+			t.Errorf("Expected: %v\nGot: %v\nRequest: %v %v", shouldMatch, matched, request.Method, url)
 		}
 
 		if matched {
@@ -188,7 +183,6 @@ func TestRouteMatchers(t *testing.T) {
 	match(true)
 
 	// 2nd route --------------------------------------------------------------
-
 	// Everything match.
 	reset2()
 	match(true)
@@ -263,6 +257,18 @@ var hostMatcherTests = []hostMatcherTest{
 	{
 		matcher: NewRouter().NewRoute().Host("{foo:[a-z][a-z][a-z]}.{bar:[a-z][a-z][a-z]}.{baz:[a-z][a-z][a-z]}"),
 		url:     "http://abc.def.ghi/",
+		vars:    map[string]string{"foo": "abc", "bar": "def", "baz": "ghi"},
+		result:  true,
+	},
+	{
+		matcher: NewRouter().NewRoute().Host("{foo:[a-z][a-z][a-z]}.{bar:[a-z][a-z][a-z]}.{baz:[a-z][a-z][a-z]}:{port:.*}"),
+		url:     "http://abc.def.ghi:65535/",
+		vars:    map[string]string{"foo": "abc", "bar": "def", "baz": "ghi", "port": "65535"},
+		result:  true,
+	},
+	{
+		matcher: NewRouter().NewRoute().Host("{foo:[a-z][a-z][a-z]}.{bar:[a-z][a-z][a-z]}.{baz:[a-z][a-z][a-z]}"),
+		url:     "http://abc.def.ghi:65535/",
 		vars:    map[string]string{"foo": "abc", "bar": "def", "baz": "ghi"},
 		result:  true,
 	},
@@ -372,6 +378,11 @@ var urlBuildingTests = []urlBuildingTest{
 		url:   "http://bar.domain.com",
 	},
 	{
+		route: new(Route).Host("{subdomain}.domain.com:{port:.*}"),
+		vars:  []string{"subdomain", "bar", "port", "65535"},
+		url:   "http://bar.domain.com:65535",
+	},
+	{
 		route: new(Route).Host("foo.domain.com").Path("/articles"),
 		vars:  []string{},
 		url:   "http://foo.domain.com/articles",
@@ -390,6 +401,11 @@ var urlBuildingTests = []urlBuildingTest{
 		route: new(Route).Host("{subdomain}.domain.com").Path("/articles/{category}/{id:[0-9]+}"),
 		vars:  []string{"subdomain", "foo", "category", "technology", "id", "42"},
 		url:   "http://foo.domain.com/articles/technology/42",
+	},
+	{
+		route: new(Route).Host("example.com").Schemes("https", "http"),
+		vars:  []string{},
+		url:   "https://example.com",
 	},
 }
 
@@ -413,7 +429,11 @@ func TestHeaderMatcher(t *testing.T) {
 
 func TestHostMatcher(t *testing.T) {
 	for _, v := range hostMatcherTests {
-		request, _ := http.NewRequest("GET", v.url, nil)
+		request, err := http.NewRequest("GET", v.url, nil)
+		if err != nil {
+			t.Errorf("http.NewRequest failed %#v", err)
+			continue
+		}
 		var routeMatch RouteMatch
 		result := v.matcher.Match(request, &routeMatch)
 		vars := routeMatch.Vars
@@ -508,18 +528,6 @@ func TestUrlBuilding(t *testing.T) {
 		url := u.String()
 		if url != v.url {
 			t.Errorf("expected %v, got %v", v.url, url)
-			/*
-				reversePath := ""
-				reverseHost := ""
-				if v.route.pathTemplate != nil {
-						reversePath = v.route.pathTemplate.Reverse
-				}
-				if v.route.hostTemplate != nil {
-						reverseHost = v.route.hostTemplate.Reverse
-				}
-
-				t.Errorf("%#v:\nexpected: %q\ngot: %q\nreverse path: %q\nreverse host: %q", v.route, v.url, url, reversePath, reverseHost)
-			*/
 		}
 	}
 
@@ -687,7 +695,7 @@ func TestNewRegexp(t *testing.T) {
 	}
 
 	for pattern, paths := range tests {
-		p, _ = newRouteRegexp(pattern, false, false, false, false, false)
+		p, _ = newRouteRegexp(pattern, regexpTypePath, routeRegexpOptions{})
 		for path, result := range paths {
 			matches = p.regexp.FindStringSubmatch(path)
 			if result == nil {
